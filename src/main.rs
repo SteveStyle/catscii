@@ -1,22 +1,39 @@
+use pretty_hex::PrettyHex;
 use serde::Deserialize;
 
 #[tokio::main]
 async fn main() {
-    let res = reqwest::get("https://api.thecatapi.com/v1/images/search")
-        .await
-        .unwrap();
-    if !res.status().is_success() {
-        panic!("Request failed with HTTP {}", res.status());
-    }
+    let image_bytes = get_cat_image_bytes().await.unwrap();
+    // only dump the first 200 bytes so our terminal survives the
+    // onslaught. this will panic if the image has fewer than 200 bytes.
+    println!("{:?}", &image_bytes[..200].hex_dump());
+}
+
+async fn get_cat_image_bytes() -> color_eyre::Result<Vec<u8>> {
     #[derive(Deserialize)]
     struct CatImage {
         url: String,
     }
 
-    let images: Vec<CatImage> = res.json().await.unwrap();
-    let image = images
-        .first()
-        .expect("the cat API should return at least one image");
+    let api_url = "https://api.thecatapi.com/v1/images/search";
+    let client = reqwest::Client::default();
 
-    println!("The image is at {}", image.url);
+    let image = client
+        .get(api_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<Vec<CatImage>>()
+        .await?
+        .pop()
+        .ok_or_else(|| color_eyre::eyre::eyre!("The Cat API returned no images"))?;
+
+    Ok(client
+        .get(image.url)
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?
+        .to_vec())
 }
